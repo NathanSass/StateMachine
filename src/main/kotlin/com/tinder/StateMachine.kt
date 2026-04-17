@@ -2,27 +2,6 @@ package com.tinder
 
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Interface for states that require lifecycle management.
- * States implementing this interface will have [onCleanUp] called
- * when the state machine transitions away from them, ensuring
- * resources are released and the state is properly deactivated.
- *
- * This prevents "zombie states" — inactive state instances that
- * retain stale data or hold resources unnecessarily.
- */
-interface ManagedState {
-    /**
-     * Called when transitioning away from this state.
-     * Implementations should release any resources, cancel ongoing work,
-     * and sever connections to external systems.
-     *
-     * After this method is called, the state instance should be considered
-     * inactive and will become eligible for garbage collection.
-     */
-    fun onCleanUp()
-}
-
 class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private constructor(
     private val graph: Graph<STATE, EVENT, SIDE_EFFECT>
 ) {
@@ -40,7 +19,7 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                 val isRealTransition = fromState !== transition.toState
                 // Clean up old state before creating new one
                 if (isRealTransition) {
-                    (fromState as? ManagedState)?.onCleanUp()
+                    fromState.notifyOnCleanUp(event)
                 }
                 // Use factory if available for target state
                 val toState = if (isRealTransition) {
@@ -101,6 +80,10 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         return factory?.invoke(state) ?: state
     }
 
+    private fun STATE.notifyOnCleanUp(cause: EVENT) {
+        getDefinitionOrNull()?.onCleanUpListeners?.forEach { it(this, cause) }
+    }
+
     private fun STATE.notifyOnEnter(cause: EVENT) {
         getDefinition().onEnterListeners.forEach { it(this, cause) }
     }
@@ -140,8 +123,11 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         class State<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> internal constructor() {
             val onEnterListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val onExitListeners = mutableListOf<(STATE, EVENT) -> Unit>()
+            val onCleanUpListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val transitions = linkedMapOf<Matcher<EVENT, EVENT>, (STATE, EVENT) -> TransitionTo<STATE, SIDE_EFFECT>>()
             var stateFactory: ((STATE) -> STATE)? = null
+            var stateClass: Class<*>? = null
+            val targetStateClasses = mutableSetOf<Class<*>>()
 
             data class TransitionTo<out STATE : Any, out SIDE_EFFECT : Any> internal constructor(
                 val toState: STATE,
@@ -190,12 +176,23 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             stateDefinitions[stateMatcher] = StateDefinitionBuilder<S>().apply(init).build()
         }
 
+        @PublishedApi
+        internal fun <S : STATE> registerState(
+            stateMatcher: Matcher<STATE, S>,
+            stateClass: Class<*>,
+            init: StateDefinitionBuilder<S>.() -> Unit
+        ) {
+            val definition = StateDefinitionBuilder<S>().apply(init).build()
+            definition.stateClass = stateClass
+            stateDefinitions[stateMatcher] = definition
+        }
+
         inline fun <reified S : STATE> state(noinline init: StateDefinitionBuilder<S>.() -> Unit) {
-            state(Matcher.any(), init)
+            registerState(Matcher.any(), S::class.java, init)
         }
 
         inline fun <reified S : STATE> state(state: S, noinline init: StateDefinitionBuilder<S>.() -> Unit) {
-            state(Matcher.eq<STATE, S>(state), init)
+            registerState(Matcher.eq<STATE, S>(state), S::class.java, init)
         }
 
         fun onTransition(listener: (Transition<STATE, EVENT, SIDE_EFFECT>) -> Unit) {
@@ -203,7 +200,49 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         }
 
         fun build(): Graph<STATE, EVENT, SIDE_EFFECT> {
-            return Graph(requireNotNull(initialState), stateDefinitions.toMap(), onTransitionListeners.toList())
+            val init = requireNotNull(initialState)
+
+            val allTargets = stateDefinitions.values.flatMap { it.targetStateClasses }.toSet()
+            if (allTargets.isNotEmpty()) {
+                val registeredClasses = stateDefinitions.values.mapNotNull { it.stateClass }.toSet()
+
+                // All transition targets must have registered state definitions
+                val missing = allTargets - registeredClasses
+                require(missing.isEmpty()) {
+                    "Missing state definitions for transition targets: ${missing.joinToString { it.simpleName ?: it.name }}"
+                }
+
+                // Initial state must have a registered definition
+                require(init::class.java in registeredClasses) {
+                    "Initial state ${init::class.java.simpleName} has no registered definition"
+                }
+
+                // All registered states must be reachable from the initial state
+                val reachable = findReachableStates(init::class.java)
+                val unreachable = registeredClasses - reachable
+                require(unreachable.isEmpty()) {
+                    "Unreachable states: ${unreachable.joinToString { it.simpleName ?: it.name }}"
+                }
+            }
+
+            return Graph(init, stateDefinitions.toMap(), onTransitionListeners.toList())
+        }
+
+        private fun findReachableStates(initialClass: Class<*>): Set<Class<*>> {
+            val classToTargets = mutableMapOf<Class<*>, Set<Class<*>>>()
+            for (definition in stateDefinitions.values) {
+                val cls = definition.stateClass ?: continue
+                classToTargets[cls] = definition.targetStateClasses
+            }
+            val visited = mutableSetOf<Class<*>>()
+            val queue = ArrayDeque<Class<*>>()
+            queue.add(initialClass)
+            while (queue.isNotEmpty()) {
+                val current = queue.removeFirst()
+                if (!visited.add(current)) continue
+                classToTargets[current]?.let { queue.addAll(it) }
+            }
+            return visited
         }
 
         inner class StateDefinitionBuilder<S : STATE> {
@@ -249,6 +288,26 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                     @Suppress("UNCHECKED_CAST")
                     listener(state as S, cause)
                 }
+            }
+
+            fun onCleanUp(listener: S.(EVENT) -> Unit) = with(stateDefinition) {
+                onCleanUpListeners.add { state, cause ->
+                    @Suppress("UNCHECKED_CAST")
+                    listener(state as S, cause)
+                }
+            }
+
+            @PublishedApi
+            internal fun addTargetStateClass(targetClass: Class<*>) {
+                stateDefinition.targetStateClasses.add(targetClass)
+            }
+
+            inline fun <reified E : EVENT> transition(
+                targetState: STATE,
+                sideEffect: SIDE_EFFECT? = null
+            ) {
+                addTargetStateClass(targetState::class.java)
+                on<E> { transitionTo(targetState, sideEffect) }
             }
 
             fun factory(create: (S) -> S) {

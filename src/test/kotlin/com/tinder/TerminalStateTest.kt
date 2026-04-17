@@ -223,7 +223,7 @@ internal class TerminalStateTest {
                     transition<Event.Fail, State.Error>(State.Error("default"))
                 }
                 terminalState<State.Error> {
-                    factory { intended ->
+                    factory { intended: State ->
                         factoryCallCount++
                         State.Error("factory:${(intended as State.Error).reason}")
                     }

@@ -266,7 +266,7 @@ internal class ManagedStateTest {
                     }
                 }
                 state<State.Connected> {
-                    factory { intended ->
+                    factory { intended: State ->
                         val conn = intended as State.Connected
                         factoryCallCount++
                         State.Connected(conn.connectionId * 10)
@@ -297,7 +297,7 @@ internal class ManagedStateTest {
                     }
                 }
                 state<State.Connected> {
-                    factory { intended -> State.Connected((intended as State.Connected).connectionId) }
+                    factory { intended: State -> State.Connected((intended as State.Connected).connectionId) }
                     on<Event.Disconnect> {
                         transitionTo(State.Disconnected)
                     }
@@ -328,7 +328,7 @@ internal class ManagedStateTest {
                     }
                 }
                 state<State.Connected> {
-                    factory { intended ->
+                    factory { intended: State ->
                         val conn = intended as State.Connected
                         receivedConnectionId = conn.connectionId
                         State.Connected(conn.connectionId)
@@ -382,7 +382,7 @@ internal class ManagedStateTest {
                     }
                 }
                 state<State.Connected> {
-                    factory { _ -> State.Connected(999) }
+                    factory { _: State -> State.Connected(999) }
                     on<Event.Disconnect> {
                         transitionTo(State.Disconnected)
                     }
@@ -425,7 +425,7 @@ internal class ManagedStateTest {
                 initialState(State.ResourceHolder("first"))
                 state<State.ResourceHolder> {
                     onCleanUp { cleanedUpNames.add((this as State.ResourceHolder).name) }
-                    factory { intended ->
+                    factory { intended: State ->
                         val rh = intended as State.ResourceHolder
                         factoryCreatedNames.add(rh.name)
                         State.ResourceHolder(rh.name)
@@ -464,7 +464,7 @@ internal class ManagedStateTest {
                 initialState(State.ResourceHolder("a"))
                 state<State.ResourceHolder> {
                     onCleanUp { cleanedUpNames.add((this as State.ResourceHolder).name) }
-                    factory { intended ->
+                    factory { intended: State ->
                         val rh = intended as State.ResourceHolder
                         factoryCreatedNames.add(rh.name)
                         State.ResourceHolder(rh.name)
@@ -497,7 +497,7 @@ internal class ManagedStateTest {
                 initialState(State.ResourceHolder("old"))
                 state<State.ResourceHolder> {
                     onCleanUp { events.add("cleanup:${(this as State.ResourceHolder).name}") }
-                    factory { intended ->
+                    factory { intended: State ->
                         val rh = intended as State.ResourceHolder
                         events.add("factory:${rh.name}")
                         State.ResourceHolder(rh.name)

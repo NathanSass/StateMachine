@@ -24,17 +24,14 @@ internal class GraphValidationTest {
                 object E3 : Event()
             }
 
-            sealed class SideEffect {
-                object SE1 : SideEffect()
-            }
         }
 
         @Test
         fun validGraph_withStaticTransitions_shouldBuildSuccessfully() {
-            val sm = StateMachine.create<State, Event, SideEffect> {
+            val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1, State.B>(State.B, SideEffect.SE1)
+                    transition<Event.E1, State.B>(State.B)
                 }
                 state<State.B> {
                     transition<Event.E2, State.A>(State.A)
@@ -76,10 +73,10 @@ internal class GraphValidationTest {
 
         @Test
         fun staticTransitions_shouldWorkAtRuntime() {
-            val sm = StateMachine.create<State, Event, SideEffect> {
+            val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1, State.B>(State.B, SideEffect.SE1)
+                    transition<Event.E1, State.B>(State.B)
                 }
                 state<State.B> {
                     transition<Event.E2, State.A>(State.A)
@@ -90,8 +87,6 @@ internal class GraphValidationTest {
 
             assertThat(sm.state).isEqualTo(State.B)
             assertThat(transition).isInstanceOf(StateMachine.Transition.Valid::class.java)
-            val valid = transition as StateMachine.Transition.Valid
-            assertThat(valid.sideEffect).isEqualTo(SideEffect.SE1)
         }
     }
 
@@ -276,7 +271,7 @@ internal class GraphValidationTest {
                 }
                 state<State.Idle> {
                     transition<Event.Activate, State.Active>(State.Active(0))
-                    factory { _ ->
+                    factory { _: State ->
                         factoryCallCount++
                         State.Idle
                     }

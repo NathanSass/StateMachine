@@ -2,6 +2,27 @@ package com.tinder
 
 import java.util.concurrent.atomic.AtomicReference
 
+/**
+ * Interface for states that require lifecycle management.
+ * States implementing this interface will have [onCleanUp] called
+ * when the state machine transitions away from them, ensuring
+ * resources are released and the state is properly deactivated.
+ *
+ * This prevents "zombie states" — inactive state instances that
+ * retain stale data or hold resources unnecessarily.
+ */
+interface ManagedState {
+    /**
+     * Called when transitioning away from this state.
+     * Implementations should release any resources, cancel ongoing work,
+     * and sever connections to external systems.
+     *
+     * After this method is called, the state instance should be considered
+     * inactive and will become eligible for garbage collection.
+     */
+    fun onCleanUp()
+}
+
 class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private constructor(
     private val graph: Graph<STATE, EVENT, SIDE_EFFECT>
 ) {
@@ -16,9 +37,26 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             val fromState = stateRef.get()
             val transition = fromState.getTransition(event)
             if (transition is Transition.Valid) {
-                stateRef.set(transition.toState)
+                val isRealTransition = fromState !== transition.toState
+                // Clean up old state before creating new one
+                if (isRealTransition) {
+                    (fromState as? ManagedState)?.onCleanUp()
+                }
+                // Use factory if available for target state
+                val toState = if (isRealTransition) {
+                    resolveState(transition.toState)
+                } else {
+                    transition.toState
+                }
+                stateRef.set(toState)
+                if (toState !== transition.toState) {
+                    Transition.Valid(fromState, event, toState, transition.sideEffect)
+                } else {
+                    transition
+                }
+            } else {
+                transition
             }
-            transition
         }
         transition.notifyOnTransition()
         if (transition is Transition.Valid) {
@@ -52,6 +90,16 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         .filter { it.key.matches(this) }
         .map { it.value }
         .firstOrNull() ?: error("Missing definition for state ${this.javaClass.simpleName}!")
+
+    private fun STATE.getDefinitionOrNull() = graph.stateDefinitions
+        .filter { it.key.matches(this) }
+        .map { it.value }
+        .firstOrNull()
+
+    private fun resolveState(state: STATE): STATE {
+        val factory = state.getDefinitionOrNull()?.stateFactory
+        return factory?.invoke(state) ?: state
+    }
 
     private fun STATE.notifyOnEnter(cause: EVENT) {
         getDefinition().onEnterListeners.forEach { it(this, cause) }
@@ -93,6 +141,7 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             val onEnterListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val onExitListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val transitions = linkedMapOf<Matcher<EVENT, EVENT>, (STATE, EVENT) -> TransitionTo<STATE, SIDE_EFFECT>>()
+            var stateFactory: ((STATE) -> STATE)? = null
 
             data class TransitionTo<out STATE : Any, out SIDE_EFFECT : Any> internal constructor(
                 val toState: STATE,
@@ -199,6 +248,13 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                 onExitListeners.add { state, cause ->
                     @Suppress("UNCHECKED_CAST")
                     listener(state as S, cause)
+                }
+            }
+
+            fun factory(create: (S) -> S) {
+                stateDefinition.stateFactory = { state ->
+                    @Suppress("UNCHECKED_CAST")
+                    create(state as S)
                 }
             }
 

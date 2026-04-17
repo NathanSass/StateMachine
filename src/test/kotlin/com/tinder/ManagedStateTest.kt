@@ -267,8 +267,9 @@ internal class ManagedStateTest {
                 }
                 state<State.Connected> {
                     factory { intended ->
+                        val conn = intended as State.Connected
                         factoryCallCount++
-                        State.Connected(intended.connectionId * 10)
+                        State.Connected(conn.connectionId * 10)
                     }
                     on<Event.Disconnect> {
                         transitionTo(State.Disconnected)
@@ -296,7 +297,7 @@ internal class ManagedStateTest {
                     }
                 }
                 state<State.Connected> {
-                    factory { intended -> State.Connected(intended.connectionId) }
+                    factory { intended -> State.Connected((intended as State.Connected).connectionId) }
                     on<Event.Disconnect> {
                         transitionTo(State.Disconnected)
                     }
@@ -328,8 +329,9 @@ internal class ManagedStateTest {
                 }
                 state<State.Connected> {
                     factory { intended ->
-                        receivedConnectionId = intended.connectionId
-                        State.Connected(intended.connectionId)
+                        val conn = intended as State.Connected
+                        receivedConnectionId = conn.connectionId
+                        State.Connected(conn.connectionId)
                     }
                     on<Event.Disconnect> {
                         transitionTo(State.Disconnected)
@@ -422,10 +424,11 @@ internal class ManagedStateTest {
             val stateMachine = StateMachine.create<State, Event, Nothing> {
                 initialState(State.ResourceHolder("first"))
                 state<State.ResourceHolder> {
-                    onCleanUp { cleanedUpNames.add(name) }
+                    onCleanUp { cleanedUpNames.add((this as State.ResourceHolder).name) }
                     factory { intended ->
-                        factoryCreatedNames.add(intended.name)
-                        State.ResourceHolder(intended.name)
+                        val rh = intended as State.ResourceHolder
+                        factoryCreatedNames.add(rh.name)
+                        State.ResourceHolder(rh.name)
                     }
                     on<Event.Swap> {
                         transitionTo(State.ResourceHolder("second"))
@@ -460,10 +463,11 @@ internal class ManagedStateTest {
             val stateMachine = StateMachine.create<State, Event, Nothing> {
                 initialState(State.ResourceHolder("a"))
                 state<State.ResourceHolder> {
-                    onCleanUp { cleanedUpNames.add(name) }
+                    onCleanUp { cleanedUpNames.add((this as State.ResourceHolder).name) }
                     factory { intended ->
-                        factoryCreatedNames.add(intended.name)
-                        State.ResourceHolder(intended.name)
+                        val rh = intended as State.ResourceHolder
+                        factoryCreatedNames.add(rh.name)
+                        State.ResourceHolder(rh.name)
                     }
                     on<Event.Swap> {
                         transitionTo(State.ResourceHolder("next"))
@@ -492,10 +496,11 @@ internal class ManagedStateTest {
             val stateMachine = StateMachine.create<State, Event, Nothing> {
                 initialState(State.ResourceHolder("old"))
                 state<State.ResourceHolder> {
-                    onCleanUp { events.add("cleanup:$name") }
+                    onCleanUp { events.add("cleanup:${(this as State.ResourceHolder).name}") }
                     factory { intended ->
-                        events.add("factory:${intended.name}")
-                        State.ResourceHolder(intended.name)
+                        val rh = intended as State.ResourceHolder
+                        events.add("factory:${rh.name}")
+                        State.ResourceHolder(rh.name)
                     }
                     on<Event.Swap> {
                         transitionTo(State.ResourceHolder("new"))

@@ -88,7 +88,7 @@ internal class ConcurrencyTest {
                 state<State.B> {
                     factory { intended ->
                         factoryCount.incrementAndGet()
-                        State.B(intended.id)
+                        State.B((intended as State.B).id)
                     }
                     on<Event.ToA> { transitionTo(State.A()) }
                 }
@@ -176,7 +176,7 @@ internal class ConcurrencyTest {
                 state<State.B> {
                     factory { intended ->
                         events.add("factory:B")
-                        State.B(intended.id)
+                        State.B((intended as State.B).id)
                     }
                     onCleanUp { events.add("cleanup:B") }
                     on<Event.ToA> { transitionTo(State.A()) }
@@ -184,7 +184,7 @@ internal class ConcurrencyTest {
                 state<State.A> {
                     factory { intended ->
                         events.add("factory:A")
-                        State.A(intended.id)
+                        State.A((intended as State.A).id)
                     }
                     onCleanUp { events.add("cleanup:A") }
                     on<Event.ToB> { transitionTo(State.B()) }

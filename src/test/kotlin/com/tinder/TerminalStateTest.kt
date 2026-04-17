@@ -225,7 +225,7 @@ internal class TerminalStateTest {
                 terminalState<State.Error> {
                     factory { intended ->
                         factoryCallCount++
-                        State.Error("factory:${intended.reason}")
+                        State.Error("factory:${(intended as State.Error).reason}")
                     }
                 }
             }

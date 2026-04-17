@@ -92,7 +92,12 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         class State<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> internal constructor() {
             val onEnterListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val onExitListeners = mutableListOf<(STATE, EVENT) -> Unit>()
+            val onCleanUpListeners = mutableListOf<(STATE, EVENT) -> Unit>()
             val transitions = linkedMapOf<Matcher<EVENT, EVENT>, (STATE, EVENT) -> TransitionTo<STATE, SIDE_EFFECT>>()
+            var stateFactory: ((STATE) -> STATE)? = null
+            var stateClass: Class<*>? = null
+            var isTerminal: Boolean = false
+            val targetStateClasses = mutableSetOf<Class<*>>()
 
             data class TransitionTo<out STATE : Any, out SIDE_EFFECT : Any> internal constructor(
                 val toState: STATE,
@@ -141,12 +146,38 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             stateDefinitions[stateMatcher] = StateDefinitionBuilder<S>().apply(init).build()
         }
 
+        @PublishedApi
+        internal fun <S : STATE> registerState(
+            stateMatcher: Matcher<STATE, S>,
+            stateClass: Class<*>,
+            init: StateDefinitionBuilder<S>.() -> Unit
+        ) {
+            TODO("Implement: register a state definition and track its class for graph validation")
+        }
+
         inline fun <reified S : STATE> state(noinline init: StateDefinitionBuilder<S>.() -> Unit) {
-            state(Matcher.any(), init)
+            registerState(Matcher.any(), S::class.java, init)
         }
 
         inline fun <reified S : STATE> state(state: S, noinline init: StateDefinitionBuilder<S>.() -> Unit) {
-            state(Matcher.eq<STATE, S>(state), init)
+            registerState(Matcher.eq<STATE, S>(state), S::class.java, init)
+        }
+
+        @PublishedApi
+        internal fun <S : STATE> registerTerminalState(
+            stateMatcher: Matcher<STATE, S>,
+            stateClass: Class<*>,
+            init: (StateDefinitionBuilder<S>.() -> Unit)?
+        ) {
+            TODO("Implement: register a terminal state (sink state with no outgoing transitions)")
+        }
+
+        inline fun <reified S : STATE> terminalState() {
+            registerTerminalState<S>(Matcher.any(), S::class.java, null)
+        }
+
+        inline fun <reified S : STATE> terminalState(noinline init: StateDefinitionBuilder<S>.() -> Unit) {
+            registerTerminalState(Matcher.any(), S::class.java, init)
         }
 
         fun onTransition(listener: (Transition<STATE, EVENT, SIDE_EFFECT>) -> Unit) {
@@ -154,6 +185,11 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
         }
 
         fun build(): Graph<STATE, EVENT, SIDE_EFFECT> {
+            // TODO: Add graph validation here — check for missing state definitions,
+            // unreachable states, and invalid initial states.
+            // Validation should only run when static transitions (transition()) are used.
+            // Terminal states are exempt from reachability checks.
+            // Throw IllegalArgumentException for validation failures.
             return Graph(requireNotNull(initialState), stateDefinitions.toMap(), onTransitionListeners.toList())
         }
 
@@ -200,6 +236,26 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                     @Suppress("UNCHECKED_CAST")
                     listener(state as S, cause)
                 }
+            }
+
+            fun onCleanUp(listener: S.(EVENT) -> Unit) = with(stateDefinition) {
+                TODO("Implement: register a cleanup callback that fires during state transitions")
+            }
+
+            @PublishedApi
+            internal fun addTargetStateClass(targetClass: Class<*>) {
+                stateDefinition.targetStateClasses.add(targetClass)
+            }
+
+            inline fun <reified E : EVENT, reified T : STATE> transition(
+                targetState: T,
+                sideEffect: SIDE_EFFECT? = null
+            ) {
+                TODO("Implement: declare a validated static transition and track target for graph validation")
+            }
+
+            fun factory(create: (S) -> S) {
+                TODO("Implement: register a factory that creates fresh state instances on entry")
             }
 
             fun build() = stateDefinition

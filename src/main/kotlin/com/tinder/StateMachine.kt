@@ -337,11 +337,11 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                 stateDefinition.targetStateClasses.add(targetClass)
             }
 
-            inline fun <reified E : EVENT> transition(
-                targetState: STATE,
+            inline fun <reified E : EVENT, reified T : STATE> transition(
+                targetState: T,
                 sideEffect: SIDE_EFFECT? = null
             ) {
-                addTargetStateClass(targetState::class.java)
+                addTargetStateClass(T::class.java)
                 on<E> { transitionTo(targetState, sideEffect) }
             }
 

@@ -31,8 +31,8 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active)
                 state<State.Active> {
-                    transition<Event.Fail>(State.Failed)
-                    transition<Event.Complete>(State.Done)
+                    transition<Event.Fail, State.Failed>(State.Failed)
+                    transition<Event.Complete, State.Done>(State.Done)
                 }
                 terminalState<State.Failed>()
                 terminalState<State.Done>()
@@ -47,7 +47,7 @@ internal class TerminalStateTest {
                 StateMachine.create<State, Event, Nothing> {
                     initialState(State.Failed)
                     state<State.Active> {
-                        transition<Event.Fail>(State.Failed)
+                        transition<Event.Fail, State.Failed>(State.Failed)
                     }
                     terminalState<State.Failed>()
                 }
@@ -63,10 +63,10 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active)
                 state<State.Active> {
-                    transition<Event.Complete>(State.Idle)
+                    transition<Event.Complete, State.Idle>(State.Idle)
                 }
                 state<State.Idle> {
-                    transition<Event.Restart>(State.Active)
+                    transition<Event.Restart, State.Active>(State.Active)
                 }
                 terminalState<State.Failed>()
             }
@@ -81,12 +81,12 @@ internal class TerminalStateTest {
                 StateMachine.create<State, Event, Nothing> {
                     initialState(State.Active)
                     state<State.Active> {
-                        transition<Event.Fail>(State.Failed)
+                        transition<Event.Fail, State.Failed>(State.Failed)
                     }
                     terminalState<State.Failed>()
                     // State.Idle is registered, not terminal, and not reachable
                     state<State.Idle> {
-                        transition<Event.Restart>(State.Active)
+                        transition<Event.Restart, State.Active>(State.Active)
                     }
                 }
             }
@@ -114,7 +114,7 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active())
                 state<State.Active> {
-                    transition<Event.Fail>(State.Failed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
                 }
                 terminalState<State.Failed>()
             }
@@ -130,7 +130,7 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active())
                 state<State.Active> {
-                    transition<Event.Fail>(State.Failed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
                 }
                 terminalState<State.Failed>()
             }
@@ -151,7 +151,7 @@ internal class TerminalStateTest {
                 initialState(State.Active())
                 state<State.Active> {
                     onCleanUp { cleanedUp = true }
-                    transition<Event.Fail>(State.Failed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
                 }
                 terminalState<State.Failed>()
             }
@@ -167,7 +167,7 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active())
                 state<State.Active> {
-                    transition<Event.Fail>(State.Failed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
                 }
                 terminalState<State.Failed> {
                     onEnter { enteredFailed = true }
@@ -187,7 +187,7 @@ internal class TerminalStateTest {
                 state<State.Active> {
                     onCleanUp { events.add("cleanup:active") }
                     onExit { events.add("exit:active") }
-                    transition<Event.Fail>(State.Failed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
                 }
                 terminalState<State.Failed> {
                     onEnter { events.add("enter:failed") }
@@ -220,7 +220,7 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active)
                 state<State.Active> {
-                    transition<Event.Fail>(State.Error("default"))
+                    transition<Event.Fail, State.Error>(State.Error("default"))
                 }
                 terminalState<State.Error> {
                     factory { intended ->
@@ -263,14 +263,14 @@ internal class TerminalStateTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Running)
                 state<State.Running> {
-                    transition<Event.Pause>(State.Paused)
-                    transition<Event.Complete>(State.Completed)
-                    transition<Event.Fail>(State.Failed)
-                    transition<Event.Cancel>(State.Cancelled)
+                    transition<Event.Pause, State.Paused>(State.Paused)
+                    transition<Event.Complete, State.Completed>(State.Completed)
+                    transition<Event.Fail, State.Failed>(State.Failed)
+                    transition<Event.Cancel, State.Cancelled>(State.Cancelled)
                 }
                 state<State.Paused> {
-                    transition<Event.Resume>(State.Running)
-                    transition<Event.Cancel>(State.Cancelled)
+                    transition<Event.Resume, State.Running>(State.Running)
+                    transition<Event.Cancel, State.Cancelled>(State.Cancelled)
                 }
                 terminalState<State.Completed>()
                 terminalState<State.Failed>()

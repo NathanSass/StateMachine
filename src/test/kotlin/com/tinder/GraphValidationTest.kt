@@ -34,10 +34,10 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, SideEffect> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1>(State.B, SideEffect.SE1)
+                    transition<Event.E1, State.B>(State.B, SideEffect.SE1)
                 }
                 state<State.B> {
-                    transition<Event.E2>(State.A)
+                    transition<Event.E2, State.A>(State.A)
                 }
             }
 
@@ -49,13 +49,13 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1>(State.B)
+                    transition<Event.E1, State.B>(State.B)
                 }
                 state<State.B> {
-                    transition<Event.E2>(State.C)
+                    transition<Event.E2, State.C>(State.C)
                 }
                 state<State.C> {
-                    transition<Event.E3>(State.A)
+                    transition<Event.E3, State.A>(State.A)
                 }
             }
 
@@ -67,7 +67,7 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1>(State.A)
+                    transition<Event.E1, State.A>(State.A)
                 }
             }
 
@@ -79,10 +79,10 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, SideEffect> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1>(State.B, SideEffect.SE1)
+                    transition<Event.E1, State.B>(State.B, SideEffect.SE1)
                 }
                 state<State.B> {
-                    transition<Event.E2>(State.A)
+                    transition<Event.E2, State.A>(State.A)
                 }
             }
 
@@ -115,7 +115,7 @@ internal class GraphValidationTest {
                 StateMachine.create<State, Event, Nothing> {
                     initialState(State.A)
                     state<State.A> {
-                        transition<Event.E1>(State.B)
+                        transition<Event.E1, State.B>(State.B)
                     }
                     // State.B has no definition
                 }
@@ -128,10 +128,10 @@ internal class GraphValidationTest {
                 StateMachine.create<State, Event, Nothing> {
                     initialState(State.A)
                     state<State.A> {
-                        transition<Event.E1>(State.B)
+                        transition<Event.E1, State.B>(State.B)
                     }
                     state<State.B> {
-                        transition<Event.E1>(State.C)
+                        transition<Event.E1, State.C>(State.C)
                     }
                     // State.C has no definition
                 }
@@ -160,10 +160,10 @@ internal class GraphValidationTest {
                 StateMachine.create<State, Event, Nothing> {
                     initialState(State.A)
                     state<State.A> {
-                        transition<Event.E1>(State.A)
+                        transition<Event.E1, State.A>(State.A)
                     }
                     state<State.B> {
-                        transition<Event.E2>(State.A)
+                        transition<Event.E2, State.A>(State.A)
                     }
                     // State.B is registered but unreachable from State.A
                 }
@@ -176,13 +176,13 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.A)
                 state<State.A> {
-                    transition<Event.E1>(State.B)
+                    transition<Event.E1, State.B>(State.B)
                 }
                 state<State.B> {
-                    transition<Event.E1>(State.C)
+                    transition<Event.E1, State.C>(State.C)
                 }
                 state<State.C> {
-                    transition<Event.E1>(State.A)
+                    transition<Event.E1, State.A>(State.A)
                 }
             }
 
@@ -210,7 +210,7 @@ internal class GraphValidationTest {
                     initialState(State.A)
                     // State.A has no definition, but State.B uses static transitions
                     state<State.B> {
-                        transition<Event.E1>(State.B)
+                        transition<Event.E1, State.B>(State.B)
                     }
                 }
             }
@@ -271,11 +271,11 @@ internal class GraphValidationTest {
             val sm = StateMachine.create<State, Event, Nothing> {
                 initialState(State.Active(1))
                 state<State.Active> {
-                    transition<Event.Deactivate>(State.Idle)
+                    transition<Event.Deactivate, State.Idle>(State.Idle)
                     onCleanUp { events.add("cleanup:active") }
                 }
                 state<State.Idle> {
-                    transition<Event.Activate>(State.Active(0))
+                    transition<Event.Activate, State.Active>(State.Active(0))
                     factory { _ ->
                         factoryCallCount++
                         State.Idle

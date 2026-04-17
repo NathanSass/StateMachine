@@ -127,6 +127,7 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             val transitions = linkedMapOf<Matcher<EVENT, EVENT>, (STATE, EVENT) -> TransitionTo<STATE, SIDE_EFFECT>>()
             var stateFactory: ((STATE) -> STATE)? = null
             var stateClass: Class<*>? = null
+            var isTerminal: Boolean = false
             val targetStateClasses = mutableSetOf<Class<*>>()
 
             data class TransitionTo<out STATE : Any, out SIDE_EFFECT : Any> internal constructor(
@@ -195,6 +196,30 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             registerState(Matcher.eq<STATE, S>(state), S::class.java, init)
         }
 
+        @PublishedApi
+        internal fun <S : STATE> registerTerminalState(
+            stateMatcher: Matcher<STATE, S>,
+            stateClass: Class<*>,
+            init: (StateDefinitionBuilder<S>.() -> Unit)?
+        ) {
+            val definition = if (init != null) {
+                StateDefinitionBuilder<S>().apply(init).build()
+            } else {
+                Graph.State<STATE, EVENT, SIDE_EFFECT>()
+            }
+            definition.stateClass = stateClass
+            definition.isTerminal = true
+            stateDefinitions[stateMatcher] = definition
+        }
+
+        inline fun <reified S : STATE> terminalState() {
+            registerTerminalState<S>(Matcher.any(), S::class.java, null)
+        }
+
+        inline fun <reified S : STATE> terminalState(noinline init: StateDefinitionBuilder<S>.() -> Unit) {
+            registerTerminalState(Matcher.any(), S::class.java, init)
+        }
+
         fun onTransition(listener: (Transition<STATE, EVENT, SIDE_EFFECT>) -> Unit) {
             onTransitionListeners.add(listener)
         }
@@ -205,6 +230,15 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
             val allTargets = stateDefinitions.values.flatMap { it.targetStateClasses }.toSet()
             if (allTargets.isNotEmpty()) {
                 val registeredClasses = stateDefinitions.values.mapNotNull { it.stateClass }.toSet()
+                val terminalClasses = stateDefinitions.values
+                    .filter { it.isTerminal }
+                    .mapNotNull { it.stateClass }
+                    .toSet()
+
+                // Cannot start in a terminal state
+                require(init::class.java !in terminalClasses) {
+                    "Cannot use terminal state ${init::class.java.simpleName} as initial state"
+                }
 
                 // All transition targets must have registered state definitions
                 val missing = allTargets - registeredClasses
@@ -218,8 +252,9 @@ class StateMachine<STATE : Any, EVENT : Any, SIDE_EFFECT : Any> private construc
                 }
 
                 // All registered states must be reachable from the initial state
+                // Terminal states are exempt — they are valid sinks reachable from any state
                 val reachable = findReachableStates(init::class.java)
-                val unreachable = registeredClasses - reachable
+                val unreachable = registeredClasses - reachable - terminalClasses
                 require(unreachable.isEmpty()) {
                     "Unreachable states: ${unreachable.joinToString { it.simpleName ?: it.name }}"
                 }

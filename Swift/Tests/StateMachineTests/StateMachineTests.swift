@@ -178,16 +178,16 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
         // actor-isolated methods synchronously. The isNotifying guard works within
         // the actor's own execution context during notify().
         // We test that the transition itself completes without error.
-        var observerCallCount = 0
+        let observerCallCount = Counter()
         await stateMachine.startObserving(self) { _ in
-            observerCallCount += 1
+            observerCallCount.increment()
         }
 
         // When
         try await stateMachine.transition(.eventOne)
 
         // Then
-        XCTAssertEqual(observerCallCount, 1)
+        XCTAssertEqual(observerCallCount.value, 1)
     }
 }
 

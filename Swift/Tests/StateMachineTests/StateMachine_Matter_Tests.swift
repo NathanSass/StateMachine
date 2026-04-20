@@ -3,7 +3,6 @@
 //  BSD License, see LICENSE file for details
 //
 
-import Nimble
 @testable import StateMachine
 import XCTest
 
@@ -83,93 +82,96 @@ final class StateMachine_Matter_Tests: XCTestCase, StateMachineBuilder {
         super.tearDown()
     }
 
-    func givenState(is state: State) -> MatterStateMachine {
+    func givenState(is state: State) async -> MatterStateMachine {
         let stateMachine: MatterStateMachine = Self.matterStateMachine(withInitialState: state, logger: logger)
-        expect(stateMachine.state).to(equal(state))
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, state)
         return stateMachine
     }
 
-    func test_givenStateIsSolid_whenMelted_shouldTransitionToLiquidState() throws {
+    func test_givenStateIsSolid_whenMelted_shouldTransitionToLiquidState() async throws {
 
         // Given
-        let stateMachine: MatterStateMachine = givenState(is: .solid)
+        let stateMachine: MatterStateMachine = await givenState(is: .solid)
 
         // When
-        let transition: ValidTransition = try stateMachine.transition(.melt)
+        let transition: ValidTransition = try await stateMachine.transition(.melt)
 
         // Then
-        expect(stateMachine.state).to(equal(.liquid))
-        expect(transition).to(equal(ValidTransition(fromState: .solid,
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .liquid)
+        XCTAssertEqual(transition, ValidTransition(fromState: .solid,
                                                     event: .melt,
                                                     toState: .liquid,
-                                                    sideEffect: .logMelted)))
-        expect(self.logger).to(log(Message.melted))
+                                                    sideEffect: .logMelted))
+        XCTAssertEqual(logger.messages, [Message.melted])
     }
 
-    func test_givenStateIsSolid_whenFrozen_shouldThrowInvalidTransitionError() throws {
+    func test_givenStateIsSolid_whenFrozen_shouldThrowInvalidTransitionError() async throws {
 
         // Given
-        let stateMachine: MatterStateMachine = givenState(is: .solid)
+        let stateMachine: MatterStateMachine = await givenState(is: .solid)
 
-        // When
-        let transition: () throws -> ValidTransition = {
-            try stateMachine.transition(.freeze)
+        // When/Then
+        do {
+            _ = try await stateMachine.transition(.freeze)
+            XCTFail("Expected InvalidTransition error")
+        } catch is InvalidTransition {
+            // Expected
         }
-
-        // Then
-        expect(transition).to(throwError { error in
-            expect(error).to(beAKindOf(InvalidTransition.self))
-        })
     }
 
-    func test_givenStateIsLiquid_whenFrozen_shouldTransitionToSolidState() throws {
+    func test_givenStateIsLiquid_whenFrozen_shouldTransitionToSolidState() async throws {
 
         // Given
-        let stateMachine: MatterStateMachine = givenState(is: .liquid)
+        let stateMachine: MatterStateMachine = await givenState(is: .liquid)
 
         // When
-        let transition: ValidTransition = try stateMachine.transition(.freeze)
+        let transition: ValidTransition = try await stateMachine.transition(.freeze)
 
         // Then
-        expect(stateMachine.state).to(equal(.solid))
-        expect(transition).to(equal(ValidTransition(fromState: .liquid,
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .solid)
+        XCTAssertEqual(transition, ValidTransition(fromState: .liquid,
                                                     event: .freeze,
                                                     toState: .solid,
-                                                    sideEffect: .logFrozen)))
-        expect(self.logger).to(log(Message.frozen))
+                                                    sideEffect: .logFrozen))
+        XCTAssertEqual(logger.messages, [Message.frozen])
     }
 
-    func test_givenStateIsLiquid_whenVaporized_shouldTransitionToGasState() throws {
+    func test_givenStateIsLiquid_whenVaporized_shouldTransitionToGasState() async throws {
 
         // Given
-        let stateMachine: MatterStateMachine = givenState(is: .liquid)
+        let stateMachine: MatterStateMachine = await givenState(is: .liquid)
 
         // When
-        let transition: ValidTransition = try stateMachine.transition(.vaporize)
+        let transition: ValidTransition = try await stateMachine.transition(.vaporize)
 
         // Then
-        expect(stateMachine.state).to(equal(.gas))
-        expect(transition).to(equal(ValidTransition(fromState: .liquid,
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .gas)
+        XCTAssertEqual(transition, ValidTransition(fromState: .liquid,
                                                     event: .vaporize,
                                                     toState: .gas,
-                                                    sideEffect: .logVaporized)))
-        expect(self.logger).to(log(Message.vaporized))
+                                                    sideEffect: .logVaporized))
+        XCTAssertEqual(logger.messages, [Message.vaporized])
     }
 
-    func test_givenStateIsGas_whenCondensed_shouldTransitionToLiquidState() throws {
+    func test_givenStateIsGas_whenCondensed_shouldTransitionToLiquidState() async throws {
 
         // Given
-        let stateMachine: MatterStateMachine = givenState(is: .gas)
+        let stateMachine: MatterStateMachine = await givenState(is: .gas)
 
         // When
-        let transition: ValidTransition = try stateMachine.transition(.condense)
+        let transition: ValidTransition = try await stateMachine.transition(.condense)
 
         // Then
-        expect(stateMachine.state).to(equal(.liquid))
-        expect(transition).to(equal(ValidTransition(fromState: .gas,
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .liquid)
+        XCTAssertEqual(transition, ValidTransition(fromState: .gas,
                                                     event: .condense,
                                                     toState: .liquid,
-                                                    sideEffect: .logCondensed)))
-        expect(self.logger).to(log(Message.condensed))
+                                                    sideEffect: .logCondensed))
+        XCTAssertEqual(logger.messages, [Message.condensed])
     }
 }

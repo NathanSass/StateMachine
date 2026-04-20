@@ -3,7 +3,6 @@
 //  BSD License, see LICENSE file for details
 //
 
-import Nimble
 @testable import StateMachine
 import XCTest
 
@@ -78,121 +77,129 @@ final class StateMachine_Turnstile_Tests: XCTestCase, StateMachineBuilder {
         super.tearDown()
     }
 
-    func givenState(is state: State) -> TurnstileStateMachine {
+    func givenState(is state: State) async -> TurnstileStateMachine {
         let stateMachine: TurnstileStateMachine = Self.turnstileStateMachine(withInitialState: state, logger: logger)
-        expect(stateMachine.state).to(equal(state))
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, state)
         return stateMachine
     }
 
-    func test_givenStateIsLocked_whenInsertCoin_andCreditLessThanFarePrice_shouldTransitionToLockedState() throws {
+    func test_givenStateIsLocked_whenInsertCoin_andCreditLessThanFarePrice_shouldTransitionToLockedState() async throws {
 
         // Given
-        let stateMachine = givenState(is: .locked(credit: 0))
+        let stateMachine = await givenState(is: .locked(credit: 0))
 
         // When
-        let transition = try stateMachine.transition(.insertCoin(10))
+        let transition = try await stateMachine.transition(.insertCoin(10))
 
         // Then
-        expect(stateMachine.state).to(equal(.locked(credit: 10)))
-        expect(transition).to(equal(ValidTransition(fromState: .locked(credit: 0),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .locked(credit: 10))
+        XCTAssertEqual(transition, ValidTransition(fromState: .locked(credit: 0),
                                                     event: .insertCoin(10),
                                                     toState: .locked(credit: 10),
-                                                    sideEffect: nil)))
+                                                    sideEffect: nil))
     }
 
-    func test_givenStateIsLocked_whenInsertCoin_andCreditEqualsFarePrice_shouldTransitionToUnlockedStateAndOpenDoors() throws {
+    func test_givenStateIsLocked_whenInsertCoin_andCreditEqualsFarePrice_shouldTransitionToUnlockedStateAndOpenDoors() async throws {
 
         // Given
-        let stateMachine = givenState(is: .locked(credit: 35))
+        let stateMachine = await givenState(is: .locked(credit: 35))
 
         // When
-        let transition = try stateMachine.transition(.insertCoin(15))
+        let transition = try await stateMachine.transition(.insertCoin(15))
 
         // Then
-        expect(stateMachine.state).to(equal(.unlocked))
-        expect(transition).to(equal(ValidTransition(fromState: .locked(credit: 35),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .unlocked)
+        XCTAssertEqual(transition, ValidTransition(fromState: .locked(credit: 35),
                                                     event: .insertCoin(15),
                                                     toState: .unlocked,
-                                                    sideEffect: .openDoors)))
+                                                    sideEffect: .openDoors))
     }
 
-    func test_givenStateIsLocked_whenInsertCoin_andCreditMoreThanFarePrice_shouldTransitionToUnlockedStateAndOpenDoors() throws {
+    func test_givenStateIsLocked_whenInsertCoin_andCreditMoreThanFarePrice_shouldTransitionToUnlockedStateAndOpenDoors() async throws {
 
         // Given
-        let stateMachine = givenState(is: .locked(credit: 35))
+        let stateMachine = await givenState(is: .locked(credit: 35))
 
         // When
-        let transition = try stateMachine.transition(.insertCoin(20))
+        let transition = try await stateMachine.transition(.insertCoin(20))
 
         // Then
-        expect(stateMachine.state).to(equal(.unlocked))
-        expect(transition).to(equal(ValidTransition(fromState: .locked(credit: 35),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .unlocked)
+        XCTAssertEqual(transition, ValidTransition(fromState: .locked(credit: 35),
                                                     event: .insertCoin(20),
                                                     toState: .unlocked,
-                                                    sideEffect: .openDoors)))
+                                                    sideEffect: .openDoors))
     }
 
-    func test_givenStateIsLocked_whenAdmitPerson_shouldTransitionToLockedStateAndSoundAlarm() throws {
+    func test_givenStateIsLocked_whenAdmitPerson_shouldTransitionToLockedStateAndSoundAlarm() async throws {
 
         // Given
-        let stateMachine = givenState(is: .locked(credit: 35))
+        let stateMachine = await givenState(is: .locked(credit: 35))
 
         // When
-        let transition = try stateMachine.transition(.admitPerson)
+        let transition = try await stateMachine.transition(.admitPerson)
 
         // Then
-        expect(stateMachine.state).to(equal(.locked(credit: 35)))
-        expect(transition).to(equal(ValidTransition(fromState: .locked(credit: 35),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .locked(credit: 35))
+        XCTAssertEqual(transition, ValidTransition(fromState: .locked(credit: 35),
                                                     event: .admitPerson,
                                                     toState: .locked(credit: 35),
-                                                    sideEffect: .soundAlarm)))
+                                                    sideEffect: .soundAlarm))
     }
 
-    func test_givenStateIsLocked_whenMachineDidFail_shouldTransitionToBrokenStateAndOrderRepair() throws {
+    func test_givenStateIsLocked_whenMachineDidFail_shouldTransitionToBrokenStateAndOrderRepair() async throws {
 
         // Given
-        let stateMachine = givenState(is: .locked(credit: 15))
+        let stateMachine = await givenState(is: .locked(credit: 15))
 
         // When
-        let transition = try stateMachine.transition(.machineDidFail)
+        let transition = try await stateMachine.transition(.machineDidFail)
 
         // Then
-        expect(stateMachine.state).to(equal(.broken(oldState: .locked(credit: 15))))
-        expect(transition).to(equal(ValidTransition(fromState: .locked(credit: 15),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .broken(oldState: .locked(credit: 15)))
+        XCTAssertEqual(transition, ValidTransition(fromState: .locked(credit: 15),
                                                     event: .machineDidFail,
                                                     toState: .broken(oldState: .locked(credit: 15)),
-                                                    sideEffect: .orderRepair)))
+                                                    sideEffect: .orderRepair))
     }
 
-    func test_givenStateIsUnlocked_whenAdmitPerson_shouldTransitionToLockedStateAndCloseDoors() throws {
+    func test_givenStateIsUnlocked_whenAdmitPerson_shouldTransitionToLockedStateAndCloseDoors() async throws {
 
         // Given
-        let stateMachine = givenState(is: .unlocked)
+        let stateMachine = await givenState(is: .unlocked)
 
         // When
-        let transition = try stateMachine.transition(.admitPerson)
+        let transition = try await stateMachine.transition(.admitPerson)
 
         // Then
-        expect(stateMachine.state).to(equal(.locked(credit: 0)))
-        expect(transition).to(equal(ValidTransition(fromState: .unlocked,
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .locked(credit: 0))
+        XCTAssertEqual(transition, ValidTransition(fromState: .unlocked,
                                                     event: .admitPerson,
                                                     toState: .locked(credit: 0),
-                                                    sideEffect: .closeDoors)))
+                                                    sideEffect: .closeDoors))
     }
 
-    func test_givenStateIsBroken_whenMachineRepairDidComplete_shouldTransitionToLockedState() throws {
+    func test_givenStateIsBroken_whenMachineRepairDidComplete_shouldTransitionToLockedState() async throws {
 
         // Given
-        let stateMachine = givenState(is: .broken(oldState: .locked(credit: 15)))
+        let stateMachine = await givenState(is: .broken(oldState: .locked(credit: 15)))
 
         // When
-        let transition = try stateMachine.transition(.machineRepairDidComplete)
+        let transition = try await stateMachine.transition(.machineRepairDidComplete)
 
         // Then
-        expect(stateMachine.state).to(equal(.locked(credit: 15)))
-        expect(transition).to(equal(ValidTransition(fromState: .broken(oldState: .locked(credit: 15)),
+        let currentState = await stateMachine.state
+        XCTAssertEqual(currentState, .locked(credit: 15))
+        XCTAssertEqual(transition, ValidTransition(fromState: .broken(oldState: .locked(credit: 15)),
                                                     event: .machineRepairDidComplete,
                                                     toState: .locked(credit: 15),
-                                                    sideEffect: nil)))
+                                                    sideEffect: nil))
     }
 }

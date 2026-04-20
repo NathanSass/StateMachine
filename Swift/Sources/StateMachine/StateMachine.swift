@@ -3,14 +3,14 @@
 //  BSD License, see LICENSE file for details
 //
 
-open class StateMachine<State: StateMachineHashable, Event: StateMachineHashable, SideEffect> {
+public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMachineHashable & Sendable, SideEffect: Sendable> {
 
     public enum Transition {
 
         public typealias Result = Swift.Result<Valid, Error>
-        public typealias Callback = (_ result: Result) -> Void
+        public typealias Callback = @Sendable (_ result: Result) -> Void
 
-        public struct Valid: CustomDebugStringConvertible {
+        public struct Valid: CustomDebugStringConvertible, Sendable {
 
             public var debugDescription: String {
                 guard let sideEffect: SideEffect = sideEffect
@@ -24,19 +24,24 @@ open class StateMachine<State: StateMachineHashable, Event: StateMachineHashable
             public let sideEffect: SideEffect?
         }
 
-        public struct Invalid: Error, Equatable {}
+        public struct Invalid: Error, Equatable, Sendable {}
     }
 
-    public enum StateMachineError: Error {
+    public enum StateMachineError: Error, Sendable {
 
         case recursionDetected
     }
 
-    private struct Observer {
+    private struct Observer: Sendable {
 
         weak var object: AnyObject?
 
         let callback: Transition.Callback
+
+        init(object: AnyObject?, callback: @escaping Transition.Callback) {
+            self.object = object
+            self.callback = callback
+        }
     }
 
     public typealias Definition = StateMachineTypes.Definition<State, Event, SideEffect>
@@ -45,27 +50,51 @@ open class StateMachine<State: StateMachineHashable, Event: StateMachineHashable
     private typealias InitialState = StateMachineTypes.InitialState<State>
     private typealias Component = StateMachineTypes.Component<State, Event, SideEffect>
 
-    private typealias States = [State.HashableIdentifier: Events]
+    private typealias States = [State.HashableIdentifier: StateDefinition]
     private typealias Events = [Event.HashableIdentifier: Action.Factory]
 
     private typealias EventHandler = StateMachineTypes.EventHandler<State, Event, SideEffect>
     private typealias Action = StateMachineTypes.Action<State, Event, SideEffect>
 
+    /// Internal state definition that holds event handlers, lifecycle callbacks, and factory
+    private struct StateDefinition: Sendable {
+        let events: Events
+        let onCleanUpCallbacks: [@Sendable (State, Event) -> Void]
+        let factory: (@Sendable (State) -> State)?
+        let isTerminal: Bool
+        let targetStateIdentifiers: Set<AnyHashable>
+    }
+
     public private(set) var state: State
 
     private let states: States
-    private var observers: [Observer] = []
+    private let terminalStateIdentifiers: Set<AnyHashable>
+    private nonisolated(unsafe) var observers: [Observer] = []
 
     private var isNotifying: Bool = false
 
     public init(@DefinitionBuilder build: () -> Definition) {
         let definition: Definition = build()
         state = definition.initialState.state
-        states = definition.states.reduce(into: States()) {
-            $0[$1.state] = $1.events.reduce(into: Events()) {
-                $0[$1.event] = $1.action
-            }
-        }
+
+        var builtStates = States()
+        var terminalIds = Set<AnyHashable>()
+
+        // TODO: Process definition.components to build state definitions
+        // - For .state components: create StateDefinition with events, onCleanUpCallbacks, factory, targetStateIdentifiers
+        // - For .terminalState components: create StateDefinition with empty events, isTerminal=true, and add to terminalIds
+        // - For .callback components: skip (handled below for observers)
+
+        states = builtStates
+        terminalStateIdentifiers = terminalIds
+
+        // TODO: Implement graph validation (only when targetStateIdentifiers are used across any state)
+        // - All target state identifiers must have registered definitions
+        // - Cannot start in a terminal state
+        // - All non-terminal registered states must be reachable from initial state (BFS/DFS)
+        // - Terminal states are exempt from reachability checks (they are valid sinks)
+        // - Use precondition() for validation failures
+
         observers = definition.callbacks.map {
             Observer(object: self, callback: $0)
         }
@@ -100,8 +129,20 @@ open class StateMachine<State: StateMachineHashable, Event: StateMachineHashable
         do {
             let stateIdentifier: State.HashableIdentifier = state.hashableIdentifier
             let eventIdentifier: Event.HashableIdentifier = event.hashableIdentifier
-            let factory: Action.Factory? = states[stateIdentifier]?[eventIdentifier]
+            let stateDefinition: StateDefinition? = states[stateIdentifier]
+            let factory: Action.Factory? = stateDefinition?.events[eventIdentifier]
             if let action: Action = try factory?(state, event) {
+                // TODO: Implement lifecycle-aware transition:
+                // 1. Determine if this is a real transition (action.toState != nil) or dontTransition
+                // 2. If real transition: call onCleanUp callbacks on the OLD state BEFORE creating new state
+                //    - onCleanUp should NOT fire for dontTransition
+                //    - onCleanUp receives the current state and the causing event
+                // 3. Resolve the target state through factory if one is registered for the target state's definition
+                //    - Look up the target state's definition by its hashableIdentifier
+                //    - If a factory exists, call it with the intended state value to get a fresh instance
+                //    - The factory-created state should be used in the Transition.Valid AND set as current state
+                // 4. Update self.state to the resolved state
+
                 let transition: Transition.Valid = .init(fromState: state,
                                                          event: event,
                                                          toState: action.toState ?? state,
@@ -139,10 +180,10 @@ extension StateMachine.Transition.Valid: Equatable where State: Equatable,
 
 public protocol StateMachineBuilder {
 
-    associatedtype State: StateMachineHashable
-    associatedtype Event: StateMachineHashable
+    associatedtype State: StateMachineHashable & Sendable
+    associatedtype Event: StateMachineHashable & Sendable
 
-    associatedtype SideEffect
+    associatedtype SideEffect: Sendable
 
     typealias InitialState = StateMachineTypes.InitialState<State>
     typealias Component = StateMachineTypes.Component<State, Event, SideEffect>
@@ -164,33 +205,49 @@ extension StateMachineBuilder {
     public static func state(
         _ state: State.HashableIdentifier
     ) -> Component {
-        .state(state: state, events: [])
+        .state(state: state, events: [], onCleanUpCallbacks: [], factory: nil, targetStateIdentifiers: Set())
     }
 
     public static func state(
         _ state: State.HashableIdentifier,
         @EventHandlerArrayBuilder build: () -> [EventHandler]
     ) -> Component {
-        .state(state: state, events: build())
+        .state(state: state, events: build(), onCleanUpCallbacks: [], factory: nil, targetStateIdentifiers: Set())
+    }
+
+    public static func state(
+        _ state: State.HashableIdentifier,
+        onCleanUp: [@Sendable (State, Event) -> Void] = [],
+        factory: (@Sendable (State) -> State)? = nil,
+        targetStateIdentifiers: Set<AnyHashable> = Set(),
+        @EventHandlerArrayBuilder build: () -> [EventHandler]
+    ) -> Component {
+        .state(state: state, events: build(), onCleanUpCallbacks: onCleanUp, factory: factory, targetStateIdentifiers: targetStateIdentifiers)
+    }
+
+    public static func terminalState(
+        _ state: State.HashableIdentifier
+    ) -> Component {
+        .terminalState(state: state)
     }
 
     public static func on(
         _ event: Event.HashableIdentifier,
-        perform: @escaping (State, Event) throws -> Action
+        perform: @escaping @Sendable (State, Event) throws -> Action
     ) -> [EventHandler] {
         [EventHandler(event: event, action: perform)]
     }
 
     public static func on(
         _ event: Event.HashableIdentifier,
-        perform: @escaping (State) throws -> Action
+        perform: @escaping @Sendable (State) throws -> Action
     ) -> [EventHandler] {
         [EventHandler(event: event) { state, _ in try perform(state) }]
     }
 
     public static func on(
         _ event: Event.HashableIdentifier,
-        perform: @escaping () throws -> Action
+        perform: @escaping @Sendable () throws -> Action
     ) -> [EventHandler] {
         [EventHandler(event: event) { _, _ in try perform() }]
     }
@@ -217,26 +274,14 @@ extension StateMachineBuilder {
 
 public enum StateMachineTypes {
 
-    public struct Definition<State: StateMachineHashable, Event: StateMachineHashable, SideEffect> {
+    public struct Definition<State: StateMachineHashable & Sendable, Event: StateMachineHashable & Sendable, SideEffect: Sendable> {
 
-        fileprivate let initialState: InitialState<State>
-        fileprivate let components: [Component<State, Event, SideEffect>]
+        let initialState: InitialState<State>
+        let components: [Component<State, Event, SideEffect>]
 
-        fileprivate typealias States = [
-            (state: State.HashableIdentifier, events: [EventHandler<State, Event, SideEffect>])
-        ]
+        typealias Callbacks = [StateMachine<State, Event, SideEffect>.Transition.Callback]
 
-        fileprivate typealias Callbacks = [StateMachine<State, Event, SideEffect>.Transition.Callback]
-
-        fileprivate var states: States {
-            components.compactMap {
-                guard case let .state(state, events) = $0
-                else { return nil }
-                return (state: state, events: events)
-            }
-        }
-
-        fileprivate var callbacks: Callbacks {
+        var callbacks: Callbacks {
             components.compactMap {
                 guard case let .callback(callback) = $0
                 else { return nil }
@@ -258,12 +303,19 @@ public enum StateMachineTypes {
 
     public struct InitialState<State> {
 
-        fileprivate let state: State
+        let state: State
     }
 
-    public enum Component<State: StateMachineHashable, Event: StateMachineHashable, SideEffect> {
+    public enum Component<State: StateMachineHashable & Sendable, Event: StateMachineHashable & Sendable, SideEffect: Sendable> {
 
-        case state(state: State.HashableIdentifier, events: [EventHandler<State, Event, SideEffect>])
+        case state(
+            state: State.HashableIdentifier,
+            events: [EventHandler<State, Event, SideEffect>],
+            onCleanUpCallbacks: [@Sendable (State, Event) -> Void],
+            factory: (@Sendable (State) -> State)?,
+            targetStateIdentifiers: Set<AnyHashable>
+        )
+        case terminalState(state: State.HashableIdentifier)
         case callback(callback: StateMachine<State, Event, SideEffect>.Transition.Callback)
     }
 
@@ -277,18 +329,18 @@ public enum StateMachineTypes {
         }
     }
 
-    public struct EventHandler<State: StateMachineHashable, Event: StateMachineHashable, SideEffect> {
+    public struct EventHandler<State: StateMachineHashable & Sendable, Event: StateMachineHashable & Sendable, SideEffect: Sendable>: Sendable {
 
-        fileprivate let event: Event.HashableIdentifier
-        fileprivate let action: Action<State, Event, SideEffect>.Factory
+        let event: Event.HashableIdentifier
+        let action: Action<State, Event, SideEffect>.Factory
     }
 
-    public struct Action<State: StateMachineHashable, Event: StateMachineHashable, SideEffect> {
+    public struct Action<State: StateMachineHashable & Sendable, Event: StateMachineHashable & Sendable, SideEffect: Sendable>: Sendable {
 
-        fileprivate typealias Factory = (State, Event) throws -> Self
+        typealias Factory = @Sendable (State, Event) throws -> Self
 
-        fileprivate let toState: State?
-        fileprivate let sideEffect: SideEffect?
+        let toState: State?
+        let sideEffect: SideEffect?
     }
 
     public struct IncorrectTypeError: Error, CustomDebugStringConvertible {

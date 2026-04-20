@@ -103,7 +103,7 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
 
     func testObservation() async throws {
 
-        var results: [Result<ValidTransition, InvalidTransition>] = []
+        let results = SafeList<Result<ValidTransition, InvalidTransition>>()
 
         // Given
         let stateMachine: TestStateMachine = await givenState(is: .stateOne)
@@ -126,7 +126,7 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
         try await stateMachine.transition(.eventTwo)
 
         // Then
-        XCTAssertEqual(results, [
+        XCTAssertEqual(results.values, [
             .success(ValidTransition(fromState: .stateOne,
                                      event: .eventOne,
                                      toState: .stateOne,
@@ -145,12 +145,12 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
 
     func testStopObservation() async throws {
 
-        var transitionCount: Int = 0
+        let transitionCount = Counter()
 
         // Given
         let stateMachine: TestStateMachine = await givenState(is: .stateOne)
         await stateMachine.startObserving(self) { _ in
-            transitionCount += 1
+            transitionCount.increment()
         }
 
         // When
@@ -158,7 +158,7 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
         try await stateMachine.transition(.eventOne)
 
         // Then
-        XCTAssertEqual(transitionCount, 2)
+        XCTAssertEqual(transitionCount.value, 2)
 
         // When
         await stateMachine.stopObserving(self)
@@ -166,7 +166,7 @@ final class StateMachineTests: XCTestCase, StateMachineBuilder {
         try await stateMachine.transition(.eventOne)
 
         // Then
-        XCTAssertEqual(transitionCount, 2)
+        XCTAssertEqual(transitionCount.value, 2)
     }
 
     func testRecursionDetectedError() async throws {

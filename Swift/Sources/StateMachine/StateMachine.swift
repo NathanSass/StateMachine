@@ -30,6 +30,8 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
     public enum StateMachineError: Error, Sendable {
 
         case recursionDetected
+        case cleanupFailed(underlyingError: Error)
+        case terminalStateReached
     }
 
     private struct Observer: Sendable {
@@ -59,8 +61,8 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
     /// Internal state definition that holds event handlers, lifecycle callbacks, and factory
     private struct StateDefinition: Sendable {
         let events: Events
-        let onCleanUpCallbacks: [@Sendable (State, Event) -> Void]
-        let factory: (@Sendable (State) -> State)?
+        let onCleanUpCallbacks: [@Sendable (State, Event) async throws -> Void]
+        let factory: (@Sendable (State) async -> State)?
         let isTerminal: Bool
         let targetStateIdentifiers: Set<AnyHashable>
     }
@@ -69,9 +71,11 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
 
     private let states: States
     private let terminalStateIdentifiers: Set<AnyHashable>
+    private let onError: (@Sendable (Error) -> Void)?
     private nonisolated(unsafe) var observers: [Observer] = []
 
     private var isNotifying: Bool = false
+    private var isHandlingError: Bool = false
 
     public init(@DefinitionBuilder build: () -> Definition) {
         let definition: Definition = build()
@@ -80,24 +84,31 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
         var builtStates = States()
         var terminalIds = Set<AnyHashable>()
 
-        // TODO: Process definition.components to build state definitions
-        // - For .state components: create StateDefinition with events, onCleanUpCallbacks, factory, targetStateIdentifiers
-        // - For .terminalState components: create StateDefinition with empty events, isTerminal=true, and add to terminalIds
-        // - For .callback components: skip (handled below for observers)
+        // TODO: Build state definitions from definition.components
 
         states = builtStates
         terminalStateIdentifiers = terminalIds
 
-        // TODO: Implement graph validation (only when targetStateIdentifiers are used across any state)
-        // - All target state identifiers must have registered definitions
-        // - Cannot start in a terminal state
-        // - All non-terminal registered states must be reachable from initial state (BFS/DFS)
-        // - Terminal states are exempt from reachability checks (they are valid sinks)
-        // - Use precondition() for validation failures
+        // TODO: Validate the state graph when static transitions are used
+
+        onError = definition.onError
 
         observers = definition.callbacks.map {
             Observer(object: self, callback: $0)
         }
+    }
+
+    private static func findReachableStates(from initial: AnyHashable, in states: States) -> Set<AnyHashable> {
+        var visited = Set<AnyHashable>()
+        var queue = [initial]
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            guard visited.insert(current).inserted else { continue }
+            if let definition = states.first(where: { AnyHashable($0.key) == current })?.value {
+                queue.append(contentsOf: definition.targetStateIdentifiers)
+            }
+        }
+        return visited
     }
 
     @discardableResult
@@ -121,7 +132,7 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
     }
 
     @discardableResult
-    public func transition(_ event: Event) throws -> Transition.Valid {
+    public func transition(_ event: Event) async throws -> Transition.Valid {
         guard !isNotifying
         else { throw StateMachineError.recursionDetected }
         let result: Transition.Result
@@ -132,16 +143,9 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
             let stateDefinition: StateDefinition? = states[stateIdentifier]
             let factory: Action.Factory? = stateDefinition?.events[eventIdentifier]
             if let action: Action = try factory?(state, event) {
-                // TODO: Implement lifecycle-aware transition:
-                // 1. Determine if this is a real transition (action.toState != nil) or dontTransition
-                // 2. If real transition: call onCleanUp callbacks on the OLD state BEFORE creating new state
-                //    - onCleanUp should NOT fire for dontTransition
-                //    - onCleanUp receives the current state and the causing event
-                // 3. Resolve the target state through factory if one is registered for the target state's definition
-                //    - Look up the target state's definition by its hashableIdentifier
-                //    - If a factory exists, call it with the intended state value to get a fresh instance
-                //    - The factory-created state should be used in the Transition.Valid AND set as current state
-                // 4. Update self.state to the resolved state
+                // TODO: Implement the transition with lifecycle callbacks.
+                // Consider: cleanup is async and can throw, factory is async,
+                // and concurrent callers must not interleave operations.
 
                 let transition: Transition.Valid = .init(fromState: state,
                                                          event: event,
@@ -217,8 +221,8 @@ extension StateMachineBuilder {
 
     public static func state(
         _ state: State.HashableIdentifier,
-        onCleanUp: [@Sendable (State, Event) -> Void] = [],
-        factory: (@Sendable (State) -> State)? = nil,
+        onCleanUp: [@Sendable (State, Event) async throws -> Void] = [],
+        factory: (@Sendable (State) async -> State)? = nil,
         targetStateIdentifiers: Set<AnyHashable> = Set(),
         @EventHandlerArrayBuilder build: () -> [EventHandler]
     ) -> Component {
@@ -270,6 +274,12 @@ extension StateMachineBuilder {
     ) -> Component {
         .callback(callback: callback)
     }
+
+    public static func onError(
+        _ handler: @escaping @Sendable (Error) -> Void
+    ) -> Component {
+        .onError(handler: handler)
+    }
 }
 
 public enum StateMachineTypes {
@@ -287,6 +297,14 @@ public enum StateMachineTypes {
                 else { return nil }
                 return callback
             }
+        }
+
+        var onError: (@Sendable (Error) -> Void)? {
+            components.compactMap {
+                guard case let .onError(handler) = $0
+                else { return nil }
+                return handler
+            }.last
         }
     }
 
@@ -311,12 +329,13 @@ public enum StateMachineTypes {
         case state(
             state: State.HashableIdentifier,
             events: [EventHandler<State, Event, SideEffect>],
-            onCleanUpCallbacks: [@Sendable (State, Event) -> Void],
-            factory: (@Sendable (State) -> State)?,
+            onCleanUpCallbacks: [@Sendable (State, Event) async throws -> Void],
+            factory: (@Sendable (State) async -> State)?,
             targetStateIdentifiers: Set<AnyHashable>
         )
         case terminalState(state: State.HashableIdentifier)
         case callback(callback: StateMachine<State, Event, SideEffect>.Transition.Callback)
+        case onError(handler: @Sendable (Error) -> Void)
     }
 
     @resultBuilder

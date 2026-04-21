@@ -84,12 +84,20 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
         var builtStates = States()
         var terminalIds = Set<AnyHashable>()
 
-        // TODO: Build state definitions from definition.components
+        // TODO: Process definition.components to build state definitions
+        // - For .state components: create StateDefinition with events, onCleanUpCallbacks, factory, targetStateIdentifiers
+        // - For .terminalState components: create StateDefinition with empty events, isTerminal=true, and add to terminalIds
+        // - For .callback and .onError components: skip (handled separately)
 
         states = builtStates
         terminalStateIdentifiers = terminalIds
 
-        // TODO: Validate the state graph when static transitions are used
+        // TODO: Validate the state graph (only when targetStateIdentifiers are used)
+        // - All target state identifiers must have registered definitions
+        // - Initial state must have a registered definition
+        // - Cannot start in a terminal state
+        // - All non-terminal states must be reachable from initial state (terminal states exempt)
+        // - Use precondition() for validation failures
 
         onError = definition.onError
 
@@ -97,6 +105,7 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
             Observer(object: self, callback: $0)
         }
     }
+
 
     private static func findReachableStates(from initial: AnyHashable, in states: States) -> Set<AnyHashable> {
         var visited = Set<AnyHashable>()
@@ -143,9 +152,12 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
             let stateDefinition: StateDefinition? = states[stateIdentifier]
             let factory: Action.Factory? = stateDefinition?.events[eventIdentifier]
             if let action: Action = try factory?(state, event) {
-                // TODO: Implement the transition with lifecycle callbacks.
-                // Consider: cleanup is async and can throw, factory is async,
-                // and concurrent callers must not interleave operations.
+                // TODO: Implement lifecycle-aware transition with concurrency safety.
+                // Requirements:
+                // - Cleanup callbacks fire on real transitions (not dontTransition), before new state
+                // - Cleanup can throw — catch errors, report via onError, still complete transition
+                // - Factory creates fresh instances for target states
+                // - Concurrent transitions must not interleave (cleanup/factory/state-update is atomic)
 
                 let transition: Transition.Valid = .init(fromState: state,
                                                          event: event,
@@ -163,6 +175,7 @@ public actor StateMachine<State: StateMachineHashable & Sendable, Event: StateMa
         }
         return try result.get()
     }
+
 
     private func notify(_ result: Transition.Result) {
         isNotifying = true

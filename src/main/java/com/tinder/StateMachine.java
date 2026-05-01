@@ -419,6 +419,18 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
         }
 
         /**
+         * Defines a state by class (chaining style).
+         * Returns the builder for method chaining.
+         */
+        public <S extends STATE> StateDefinitionBuilder<S> state(Class<S> clazz) {
+            StateDefinitionBuilder<S> builder = new StateDefinitionBuilder<>();
+            @SuppressWarnings("unchecked")
+            Matcher<STATE, STATE> matcher = (Matcher<STATE, STATE>) Matcher.any(clazz);
+            stateDefinitions.put(matcher, builder.stateDefinition);
+            return builder;
+        }
+
+        /**
          * Defines a state for a specific value.
          */
         public void state(
@@ -468,7 +480,7 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
             /**
              * Defines an event handler with a matcher.
              */
-            public <E extends EVENT> void on(
+            public <E extends EVENT> StateDefinitionBuilder<S> on(
                     Matcher<EVENT, E> eventMatcher,
                     BiFunction<S, E, Graph.State.TransitionTo<STATE, SIDE_EFFECT>> createTransitionTo) {
                 @SuppressWarnings("unchecked")
@@ -480,46 +492,51 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
                     E e = (E) event;
                     return createTransitionTo.apply(s, e);
                 });
+                return this;
             }
 
             /**
              * Defines an event handler for any event of the given class.
              */
-            public <E extends EVENT> void on(
+            public <E extends EVENT> StateDefinitionBuilder<S> on(
                     Class<E> clazz,
                     BiFunction<S, E, Graph.State.TransitionTo<STATE, SIDE_EFFECT>> createTransitionTo) {
                 on(any(clazz), createTransitionTo);
+                return this;
             }
 
             /**
              * Defines an event handler for a specific event value.
              */
-            public <E extends EVENT> void on(
+            public <E extends EVENT> StateDefinitionBuilder<S> on(
                     E event,
                     BiFunction<S, E, Graph.State.TransitionTo<STATE, SIDE_EFFECT>> createTransitionTo) {
                 on(eq(event), createTransitionTo);
+                return this;
             }
 
             /**
              * Adds an onEnter listener.
              */
-            public void onEnter(BiConsumer<S, EVENT> listener) {
+            public StateDefinitionBuilder<S> onEnter(BiConsumer<S, EVENT> listener) {
                 stateDefinition.onEnterListeners.add((state, event) -> {
                     @SuppressWarnings("unchecked")
                     S s = (S) state;
                     listener.accept(s, event);
                 });
+                return this;
             }
 
             /**
              * Adds an onExit listener.
              */
-            public void onExit(BiConsumer<S, EVENT> listener) {
+            public StateDefinitionBuilder<S> onExit(BiConsumer<S, EVENT> listener) {
                 stateDefinition.onExitListeners.add((state, event) -> {
                     @SuppressWarnings("unchecked")
                     S s = (S) state;
                     listener.accept(s, event);
                 });
+                return this;
             }
 
             Graph.State<STATE, EVENT, SIDE_EFFECT> build() {

@@ -31,6 +31,28 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
     }
 
     /**
+     * Static helper for creating a transition result (for use in on() lambdas).
+     */
+    @SuppressWarnings("unchecked")
+    public static <S, SE> Graph.State.TransitionTo<S, SE> transitionTo(S state, SE sideEffect) {
+        return new Graph.State.TransitionTo<>(state, sideEffect);
+    }
+
+    public static <S, SE> Graph.State.TransitionTo<S, SE> transitionTo(S state) {
+        return new Graph.State.TransitionTo<>(state, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static <S, SE> Graph.State.TransitionTo<S, SE> dontTransition(S state, SE sideEffect) {
+        return new Graph.State.TransitionTo<>(state, sideEffect);
+    }
+
+    public static <S, SE> Graph.State.TransitionTo<S, SE> dontTransition(S state) {
+        return new Graph.State.TransitionTo<>(state, null);
+    }
+
+
+    /**
      * Returns the current state.
      */
     public STATE getState() {

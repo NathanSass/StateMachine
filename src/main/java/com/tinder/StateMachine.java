@@ -2,18 +2,22 @@ package com.tinder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
  * A Java finite state machine implementation based on the Kotlin StateMachine.
  *
- * <p>This is a simple, non-thread-safe implementation. State transitions are not synchronized.
+ * <p>This implementation is thread-safe using synchronized blocks.
  *
  * @param <STATE> the type of states
  * @param <EVENT> the type of events
@@ -66,19 +70,20 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
      * @return the transition result (valid or invalid)
      */
     public Transition<STATE, EVENT, SIDE_EFFECT> transition(EVENT event) {
-        STATE fromState = state;
-        Transition<STATE, EVENT, SIDE_EFFECT> transition = getTransition(fromState, event);
-        if (transition instanceof Transition.Valid) {
-            Transition.Valid<STATE, EVENT, SIDE_EFFECT> valid = (Transition.Valid<STATE, EVENT, SIDE_EFFECT>) transition;
-            state = valid.toState;
-        }
-        notifyOnTransition(transition);
-        if (transition instanceof Transition.Valid) {
-            Transition.Valid<STATE, EVENT, SIDE_EFFECT> valid = (Transition.Valid<STATE, EVENT, SIDE_EFFECT>) transition;
-            notifyOnExit(fromState, event);
-            notifyOnEnter(valid.toState, event);
-        }
-        return transition;
+        // TODO: Implement the main transition method.
+        // Requirements:
+        // - Thread-safe: use synchronized(this) for the critical section
+        // - Check if current state is terminal -> return Invalid
+        // - Get the transition for the current state and event
+        // - If valid and state is actually changing:
+        //     * Call onCleanUp on old state (inside synchronized)
+        //     * Apply factory if present on target state (inside synchronized)
+        //     * Update state reference (inside synchronized)
+        // - After synchronized block:
+        //     * Notify transition listeners
+        //     * Fire onExit on old state, onEnter on new state
+        // - If dontTransition (state unchanged): fire onExit but NOT onCleanUp
+        throw new UnsupportedOperationException("TODO: implement transition");
     }
 
     /**
@@ -96,6 +101,23 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
     @SuppressWarnings("unchecked")
     private Transition<STATE, EVENT, SIDE_EFFECT> getTransition(STATE fromState, EVENT event) {
         Graph.State<STATE, EVENT, SIDE_EFFECT> definition = getDefinition(fromState);
+
+        // Check static transitions first if enabled
+        if (graph.useStaticTransitions) {
+            Matcher<STATE, STATE> stateMatcher = graph.findStateMatcher(fromState);
+            if (stateMatcher != null) {
+                Map<Class<? extends EVENT>, STATE> staticTransitions = graph.staticTransitions.get(stateMatcher);
+                if (staticTransitions != null) {
+                    STATE targetState = staticTransitions.get(event.getClass());
+                    if (targetState != null) {
+                        return new Transition.Valid<>(fromState, event, targetState, null);
+                    }
+                }
+            }
+            return new Transition.Invalid<>(fromState, event);
+        }
+
+        // Dynamic transitions
         for (Map.Entry<Matcher<EVENT, EVENT>, BiFunction<STATE, EVENT, Graph.State.TransitionTo<STATE, SIDE_EFFECT>>> entry :
                 definition.transitions.entrySet()) {
             Matcher<EVENT, EVENT> eventMatcher = entry.getKey();
@@ -248,14 +270,23 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
         private final STATE initialState;
         private final Map<Matcher<STATE, STATE>, State<STATE, EVENT, SIDE_EFFECT>> stateDefinitions;
         private final List<Consumer<Transition<STATE, EVENT, SIDE_EFFECT>>> onTransitionListeners;
+        private final Set<Matcher<STATE, STATE>> terminalStateMatchers;
+        private final boolean useStaticTransitions;
+        private final Map<Matcher<STATE, STATE>, Map<Class<? extends EVENT>, STATE>> staticTransitions;
 
         public Graph(
                 STATE initialState,
                 Map<Matcher<STATE, STATE>, State<STATE, EVENT, SIDE_EFFECT>> stateDefinitions,
-                List<Consumer<Transition<STATE, EVENT, SIDE_EFFECT>>> onTransitionListeners) {
+                List<Consumer<Transition<STATE, EVENT, SIDE_EFFECT>>> onTransitionListeners,
+                Set<Matcher<STATE, STATE>> terminalStateMatchers,
+                boolean useStaticTransitions,
+                Map<Matcher<STATE, STATE>, Map<Class<? extends EVENT>, STATE>> staticTransitions) {
             this.initialState = initialState;
             this.stateDefinitions = stateDefinitions;
             this.onTransitionListeners = onTransitionListeners;
+            this.terminalStateMatchers = terminalStateMatchers;
+            this.useStaticTransitions = useStaticTransitions;
+            this.staticTransitions = staticTransitions;
         }
 
         public STATE getInitialState() {
@@ -271,7 +302,21 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
         }
 
         public Graph<STATE, EVENT, SIDE_EFFECT> copy(STATE initialState) {
-            return new Graph<>(initialState, stateDefinitions, onTransitionListeners);
+            return new Graph<>(initialState, stateDefinitions, onTransitionListeners, terminalStateMatchers, useStaticTransitions, staticTransitions);
+        }
+
+        boolean isTerminalState(STATE state) {
+            // TODO: Check if the given state matches any terminal state matcher
+            throw new UnsupportedOperationException("TODO: implement isTerminalState");
+        }
+
+        public Matcher<STATE, STATE> findStateMatcher(STATE state) {
+            for (Matcher<STATE, STATE> matcher : stateDefinitions.keySet()) {
+                if (matcher.matches(state)) {
+                    return matcher;
+                }
+            }
+            return null;
         }
 
         /**
@@ -281,7 +326,9 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
 
             private final List<BiConsumer<STATE, EVENT>> onEnterListeners = new ArrayList<>();
             private final List<BiConsumer<STATE, EVENT>> onExitListeners = new ArrayList<>();
+            private final List<BiConsumer<STATE, EVENT>> onCleanUpListeners = new ArrayList<>();
             private final Map<Matcher<EVENT, EVENT>, BiFunction<STATE, EVENT, TransitionTo<STATE, SIDE_EFFECT>>> transitions = new LinkedHashMap<>();
+            private Function<STATE, STATE> factory;
 
             public List<BiConsumer<STATE, EVENT>> getOnEnterListeners() {
                 return onEnterListeners;
@@ -291,8 +338,20 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
                 return onExitListeners;
             }
 
+            public List<BiConsumer<STATE, EVENT>> getOnCleanUpListeners() {
+                return onCleanUpListeners;
+            }
+
             public Map<Matcher<EVENT, EVENT>, BiFunction<STATE, EVENT, TransitionTo<STATE, SIDE_EFFECT>>> getTransitions() {
                 return transitions;
+            }
+
+            public Function<STATE, STATE> getFactory() {
+                return factory;
+            }
+
+            public void setFactory(Function<STATE, STATE> factory) {
+                this.factory = factory;
             }
 
             /**
@@ -399,6 +458,9 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
         private STATE initialState;
         private final Map<Matcher<STATE, STATE>, Graph.State<STATE, EVENT, SIDE_EFFECT>> stateDefinitions = new LinkedHashMap<>();
         private final List<Consumer<Transition<STATE, EVENT, SIDE_EFFECT>>> onTransitionListeners = new ArrayList<>();
+        private final Set<Matcher<STATE, STATE>> terminalStateMatchers = new LinkedHashSet<>();
+        private boolean useStaticTransitions = false;
+        private final Map<Matcher<STATE, STATE>, Map<Class<? extends EVENT>, STATE>> staticTransitions = new LinkedHashMap<>();
 
         public GraphBuilder() {
         }
@@ -408,6 +470,9 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
                 this.initialState = graph.initialState;
                 this.stateDefinitions.putAll(graph.stateDefinitions);
                 this.onTransitionListeners.addAll(graph.onTransitionListeners);
+                this.terminalStateMatchers.addAll(graph.terminalStateMatchers);
+                this.useStaticTransitions = graph.useStaticTransitions;
+                this.staticTransitions.putAll(graph.staticTransitions);
             }
         }
 
@@ -453,12 +518,43 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
         }
 
         /**
-         * Defines a state for a specific value.
+         * Defines a state for a specific value (chaining style).
+         * Returns the builder for method chaining.
+         */
+        public StateDefinitionBuilder<STATE> state(STATE state) {
+            StateDefinitionBuilder<STATE> builder = new StateDefinitionBuilder<>();
+            @SuppressWarnings("unchecked")
+            Matcher<STATE, STATE> matcher = (Matcher<STATE, STATE>) Matcher.eq(state);
+            stateDefinitions.put(matcher, builder.stateDefinition);
+            return builder;
+        }
+
+        /**
+         * Defines a state for a specific value with initialization block.
          */
         public void state(
                 STATE state,
                 Consumer<StateDefinitionBuilder<STATE>> init) {
             state(Matcher.eq(state), init);
+        }
+
+        /**
+         * Defines a terminal state by class (chaining style).
+         */
+        public <S extends STATE> StateDefinitionBuilder<S> terminalState(Class<S> clazz) {
+            // TODO: Register a terminal state by class.
+            // Create a StateDefinitionBuilder, add the state definition,
+            // and mark it as terminal.
+            throw new UnsupportedOperationException("TODO: implement terminalState(Class)");
+        }
+
+        /**
+         * Defines a terminal state for a specific value (chaining style).
+         */
+        public StateDefinitionBuilder<STATE> terminalState(STATE state) {
+            // TODO: Register a terminal state by value.
+            // Same as terminalState(Class) but for specific instances.
+            throw new UnsupportedOperationException("TODO: implement terminalState(STATE)");
         }
 
         /**
@@ -468,14 +564,32 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
             onTransitionListeners.add(listener);
         }
 
+        void addStaticTransition(Matcher<STATE, STATE> stateMatcher, Class<? extends EVENT> eventClass, STATE targetState) {
+            useStaticTransitions = true;
+            staticTransitions.computeIfAbsent(stateMatcher, k -> new LinkedHashMap<>())
+                    .put(eventClass, targetState);
+        }
+
         /**
          * Builds the graph.
          */
         public Graph<STATE, EVENT, SIDE_EFFECT> build() {
-            if (initialState == null) {
-                throw new IllegalArgumentException("Initial state must be set");
-            }
-            return new Graph<>(initialState, new LinkedHashMap<>(stateDefinitions), new ArrayList<>(onTransitionListeners));
+            // TODO: Build the Graph.
+            // 1. If initial state is terminal, throw IllegalArgumentException
+            // 2. If using static transitions, validate the graph
+            // 3. Construct and return the Graph with all state definitions,
+            //    transition listeners, terminal state matchers, and static transitions
+            throw new UnsupportedOperationException("TODO: implement build");
+        }
+
+        private void validateGraph() {
+            // TODO: Validate the state machine graph.
+            // 1. Check that all static transition targets have definitions
+            //    (or are terminal states). Throw IllegalArgumentException if not.
+            // 2. Check for unreachable states using BFS from initial state.
+            //    Terminal states are exempt from reachability checks.
+            //    Throw IllegalArgumentException for unreachable non-terminal states.
+            throw new UnsupportedOperationException("TODO: implement validateGraph");
         }
 
         /**
@@ -538,6 +652,24 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
             }
 
             /**
+             * Defines a static transition for graph validation.
+             */
+            public <E extends EVENT> StateDefinitionBuilder<S> transition(Class<E> eventClass, STATE targetState) {
+                // Find the matcher for this state definition
+                Matcher<STATE, STATE> stateMatcher = null;
+                for (Map.Entry<Matcher<STATE, STATE>, Graph.State<STATE, EVENT, SIDE_EFFECT>> entry : stateDefinitions.entrySet()) {
+                    if (entry.getValue() == stateDefinition) {
+                        stateMatcher = entry.getKey();
+                        break;
+                    }
+                }
+                if (stateMatcher != null) {
+                    addStaticTransition(stateMatcher, eventClass, targetState);
+                }
+                return this;
+            }
+
+            /**
              * Adds an onEnter listener.
              */
             public StateDefinitionBuilder<S> onEnter(BiConsumer<S, EVENT> listener) {
@@ -558,6 +690,26 @@ public class StateMachine<STATE, EVENT, SIDE_EFFECT> {
                     S s = (S) state;
                     listener.accept(s, event);
                 });
+                return this;
+            }
+
+            /**
+             * Adds an onCleanUp listener.
+             */
+            public StateDefinitionBuilder<S> onCleanUp(BiConsumer<S, EVENT> listener) {
+                stateDefinition.onCleanUpListeners.add((state, event) -> {
+                    @SuppressWarnings("unchecked")
+                    S s = (S) state;
+                    listener.accept(s, event);
+                });
+                return this;
+            }
+
+            /**
+             * Sets a factory function for creating fresh state instances.
+             */
+            public StateDefinitionBuilder<S> factory(Function<STATE, STATE> factory) {
+                stateDefinition.setFactory(factory);
                 return this;
             }
 
